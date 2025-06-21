@@ -1,3 +1,3 @@
-# Anushka Bhattarai - Data Analyst Portfolio
+# Anushka Bhattarai - Data Analysis Portfolio
 ## About Me
 Hi! I am Anushka Bhattarai
