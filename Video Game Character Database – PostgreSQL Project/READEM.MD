@@ -23,6 +23,7 @@ The database consists of the following tables:
 - **homeland** (VARCHAR(60)): Origin or home region of the character.
 - **favorite_color** (VARCHAR(30)): Character's favorite color.
 
+
 ### `more_info`
 
 - **more_info_id** (Primary Key, SERIAL): Unique identifier for additional info entries.
