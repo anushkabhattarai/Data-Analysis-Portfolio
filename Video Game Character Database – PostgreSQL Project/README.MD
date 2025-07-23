@@ -58,5 +58,8 @@ This table represents a **many-to-many relationship** between characters and act
 - **Many-to-Many:** Characters can perform multiple actions via the `character_actions` table.
 
 ---
+Contact
+Anushka Bhattarai
+https://www.linkedin.com/in/anushka-bhattarai-789aa5238/
 
 Feel free to explore the SQL files and run queries to deepen your understanding of relational databases.
