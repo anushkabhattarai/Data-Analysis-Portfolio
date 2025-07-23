@@ -100,3 +100,6 @@ The final dashboard was designed to be visually engaging and easy to explore. Th
 - Designed and organized visual elements for clear communication
 - Learned how to extract actionable insights from raw sales data
 
+# Contact
+Anushka Bhattarai
+https://www.linkedin.com/in/anushka-bhattarai-789aa5238/
