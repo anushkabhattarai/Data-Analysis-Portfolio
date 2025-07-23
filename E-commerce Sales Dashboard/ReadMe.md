@@ -1,5 +1,9 @@
 # Ecommerce Sales Dashboard – Power BI Project
 
+# View the Dashboard PDF
+You can view the HR Analytics Dashboard by clicking the link below:
+[See the Ecommerce Sales Dashboard PDF](Ecommerce%20Sales%20Dashboard.pdf)
+
 ## Objective
 
 The goal of this project was to help an ecommerce store owner track and analyze their online sales performance across India. I created an interactive Power BI dashboard to present clear insights on sales, profits, quantities, product categories, states, and payment methods.
