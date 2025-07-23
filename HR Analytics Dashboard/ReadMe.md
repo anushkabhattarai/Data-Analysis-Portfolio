@@ -97,6 +97,11 @@ The dashboard is designed to be user-friendly and interactive. It includes the f
 - Demonstrated the power of data visualization in solving real-world business problems
 
 ---
+# Contact
+Anushka Bhattarai
+https://www.linkedin.com/in/anushka-bhattarai-789aa5238/
+
+---
 
 ## How to Use
 
@@ -108,6 +113,3 @@ Since Power BI dashboards are not hosted online by default:
 
 ---
 
-## License
-
-This project is provided for educational and portfolio purposes only.
