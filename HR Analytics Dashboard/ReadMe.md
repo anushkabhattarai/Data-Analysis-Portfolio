@@ -9,7 +9,7 @@ This project aims to help organizations reduce employee attrition and improve wo
 
 You can view the interactive HR Analytics Dashboard by clicking the link below:
 
-[See the HR Analytics Dashboard PDF](HR%20Analytics%20Dashboard/HR-Analytics-Dashboard.pdf)
+[See the HR Analytics Dashboard PDF](HR-Analytics-Dashboard.pdf)
 
 ## Objective
 
