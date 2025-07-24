@@ -11,7 +11,8 @@ The dashboard includes multiple visual elements such as KPIs, bar charts, line c
 
 You can view the interactive Super Store Sales Analytics Dashboard by clicking the link below:
 
-[See the Super Store Sales Analytics Dashboard PDF](./SuperStore-Sales-Data-Dashboard.pdf)
+[See the Super Store Sales Dashboard PDF](SuperStore%20Sales%20Data/SuperStore%20Sales%20Data%20Dashboard.pdf)
+
 
 ## Objectives
 
