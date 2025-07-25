@@ -84,3 +84,7 @@ This project explores customer purchase behavior during the Diwali festival usin
 This project demonstrates how simple data analysis can uncover meaningful customer insights during festival campaigns. It also highlights how businesses can adjust their sales and marketing strategies based on data-driven evidence.
 
 # Contact Me
+
+Anushka Bhattarai 
+
+https://www.linkedin.com/in/anushka-bhattarai-789aa5238/
