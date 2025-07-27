@@ -1,7 +1,8 @@
 # Ecommerce Sales Dashboard – Power BI Project
 
 # View the Dashboard PDF
-You can view the HR Analytics Dashboard by clicking the link below:
+You can view the E-Commerce Sales Analytics Dashboard by clicking the link below:
+
 [See the Ecommerce Sales Dashboard PDF](Ecommerce%20Sales%20Dashboard.pdf)
 
 ## Objective
