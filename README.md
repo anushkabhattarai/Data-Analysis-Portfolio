@@ -1,6 +1,6 @@
 # Hi, I’m Anushka Bhattarai 👋
 
-I'm a data analyst passionate about transforming raw data into actionable insights. I focus on business intelligence, data visualization, and helping organizations make data-driven decisions.
+I'm a data & business analyst passionate about transforming raw data into actionable insights. I focus on business intelligence, data visualization, and helping organizations make data-driven decisions.
 
 ## 🔍 Background
 
