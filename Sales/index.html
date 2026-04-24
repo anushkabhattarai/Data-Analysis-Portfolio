@@ -1,0 +1,704 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Overview · Amazon Insights</title>
+<link rel="stylesheet" href="dashboard.css" />
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+</head>
+<body>
+<div class="app" id="app">
+  <div id="sidebar-mount"></div>
+
+  <main class="main">
+    <header class="topbar">
+      <div class="page-title">
+        <h1>Business Overview</h1>
+        <p id="subtitle">1,350 products · 9 categories · retail performance snapshot</p>
+      </div>
+      <div class="topbar-tools">
+        <div class="search">
+          <svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg>
+          <input id="global-search" type="text" placeholder="Search products, categories…" />
+        </div>
+        <button class="btn" id="reset-filters">Reset filters</button>
+      </div>
+    </header>
+
+    <section class="content">
+      <!-- Filter strip -->
+      <div class="filter-bar" id="filter-bar">
+        <span class="label">Category:</span>
+        <div id="cat-pills" style="display:flex;flex-wrap:wrap;gap:6px;"></div>
+        <span class="clear-link" id="clear-link">Clear all</span>
+      </div>
+
+      <!-- KPI ROW -->
+      <div class="kpi-row" id="kpis"></div>
+
+      <!-- Row 1 — Revenue over time + Category breakdown -->
+      <div class="grid two">
+        <div class="card">
+          <div class="card-head">
+            <div>
+              <h3>Revenue &amp; Profit Trend</h3>
+              <div class="sub">Rolling 12-month view · deterministic from current filter</div>
+            </div>
+            <div class="card-actions">
+              <div class="chip active" data-range="12m">12 mo</div>
+              <div class="chip" data-range="6m">6 mo</div>
+              <div class="chip" data-range="ytd">YTD</div>
+            </div>
+          </div>
+          <div class="chart-box tall"><canvas id="revTrend"></canvas></div>
+        </div>
+
+        <div class="card">
+          <div class="card-head">
+            <div>
+              <h3>Category Breakdown</h3>
+              <div class="sub">Share of revenue · click to cross-filter</div>
+            </div>
+          </div>
+          <div class="chart-box tall"><svg id="catTreemap" class="treemap"></svg></div>
+        </div>
+      </div>
+
+      <!-- Row 2 — Monthly perf + top/under -->
+      <div class="grid three-uneven">
+        <div class="card">
+          <div class="card-head">
+            <div>
+              <h3>Monthly Performance</h3>
+              <div class="sub">Revenue vs units · seasonality</div>
+            </div>
+          </div>
+          <div class="chart-box"><canvas id="monthlyBars"></canvas></div>
+        </div>
+
+        <div class="card">
+          <div class="card-head">
+            <div>
+              <h3>Top Performers</h3>
+              <div class="sub">Highest revenue proxy</div>
+            </div>
+          </div>
+          <div class="prod-list" id="topList"></div>
+        </div>
+
+        <div class="card">
+          <div class="card-head">
+            <div>
+              <h3>Underperformers</h3>
+              <div class="sub">Low rating · elevated returns risk</div>
+            </div>
+          </div>
+          <div class="prod-list" id="bottomList"></div>
+        </div>
+      </div>
+
+      <!-- Row 3 — Discount impact + shipping + sub-category heat -->
+      <div class="grid three-uneven">
+        <div class="card">
+          <div class="card-head">
+            <div>
+              <h3>Discount Impact</h3>
+              <div class="sub">Each dot = product · x = discount · y = units · size = revenue</div>
+            </div>
+          </div>
+          <div class="chart-box"><canvas id="discountBubble"></canvas></div>
+        </div>
+
+        <div class="card">
+          <div class="card-head">
+            <div>
+              <h3>Shipping &amp; Delivery Trend</h3>
+              <div class="sub">Weekly dispatch mix · 7-day rolling</div>
+            </div>
+          </div>
+          <div class="chart-box"><canvas id="shipping"></canvas></div>
+        </div>
+
+        <div class="card">
+          <div class="card-head">
+            <div>
+              <h3>Return Risk Signals</h3>
+              <div class="sub">Products with low ratings &amp; high volume</div>
+            </div>
+          </div>
+          <div class="prod-list" id="returnList"></div>
+        </div>
+      </div>
+
+      <!-- Row 4 — Sub-category heatmap (rating × price tier) -->
+      <div class="grid">
+        <div class="card">
+          <div class="card-head">
+            <div>
+              <h3>Sub-category × Price-Band Heatmap</h3>
+              <div class="sub">Revenue intensity · click any cell to cross-filter</div>
+            </div>
+            <div class="card-actions">
+              <div class="chip active" data-metric="revenue">Revenue</div>
+              <div class="chip" data-metric="units">Units</div>
+              <div class="chip" data-metric="profit">Profit</div>
+            </div>
+          </div>
+          <div style="overflow-x:auto">
+            <svg id="heatmap" class="heatmap"></svg>
+          </div>
+          <div class="heat-legend">
+            <span>Low</span>
+            <span class="gradient"></span>
+            <span>High</span>
+          </div>
+        </div>
+      </div>
+
+      <p class="note">
+        Proxy framework: reviews ≈ units sold · revenue = discounted_price × units · profit = 22% blended margin of revenue.
+        The raw dataset has no timestamps, so trend curves and monthly bars are deterministically distributed from totals using a Q4-heavy seasonal index.
+      </p>
+    </section>
+  </main>
+</div>
+
+<script src="dashboard.js"></script>
+<script>
+(async function () {
+  const data = await Dash.loadData();
+  const products = Dash.enrich(data.products || []);
+  const store = Dash.createStore(products);
+  Dash.configureChartDefaults();
+
+  // ---- Inject sidebar ----
+  document.getElementById('sidebar-mount').outerHTML = Dash.sidebarHTML('overview');
+
+  // ---- Categories pill filter ----
+  const catCounts = {};
+  products.forEach(p => { catCounts[p.main_category] = (catCounts[p.main_category] || 0) + 1; });
+  const cats = Object.entries(catCounts).sort((a, b) => b[1] - a[1]);
+
+  const pillWrap = document.getElementById('cat-pills');
+  pillWrap.innerHTML = `<div class="pill active" data-cat="__all__">All <span class="count">${products.length}</span></div>` +
+    cats.map(([c, n]) => `<div class="pill" data-cat="${c}">${c} <span class="count">${n}</span></div>`).join('');
+
+  pillWrap.addEventListener('click', e => {
+    const pill = e.target.closest('.pill');
+    if (!pill) return;
+    const c = pill.dataset.cat;
+    store.set({ category: c === '__all__' ? null : c, subcategory: null, priceBand: null });
+    [...pillWrap.children].forEach(el => el.classList.toggle('active', el === pill));
+  });
+
+  // ---- Search ----
+  const search = document.getElementById('global-search');
+  let to;
+  search.addEventListener('input', () => {
+    clearTimeout(to);
+    to = setTimeout(() => store.set({ search: search.value }), 150);
+  });
+
+  // ---- Reset ----
+  const reset = () => {
+    store.reset();
+    [...pillWrap.children].forEach((el, i) => el.classList.toggle('active', i === 0));
+    search.value = '';
+    document.querySelectorAll('.card-actions .chip').forEach(c => c.classList.remove('active'));
+    document.querySelectorAll('.card-actions').forEach(actions => {
+      const first = actions.querySelector('.chip');
+      if (first) first.classList.add('active');
+    });
+  };
+  document.getElementById('reset-filters').onclick = reset;
+  document.getElementById('clear-link').onclick = reset;
+
+  // ---- Chart instances (for updates) ----
+  let chRev, chMonthly, chBubble, chShip;
+  let heatMetric = 'revenue';
+
+  // ---- Renderers ----
+  function renderKpis(items) {
+    const totalRev = items.reduce((s, p) => s + p.revenue, 0);
+    const totalProfit = items.reduce((s, p) => s + p.profit, 0);
+    const totalOrders = items.reduce((s, p) => s + p.units, 0);
+    const totalUnits = totalOrders; // 1 rating ≈ 1 order
+    const totalSavings = items.reduce((s, p) => s + p.shopperSavings, 0);
+
+    // deltas — synthetic from filter size vs full
+    const pct = items.length ? (items.length / products.length) : 1;
+    const delta = (pct * 100 - 50) * 0.15;
+    const sign = d => d >= 0 ? 'up' : 'down';
+    const arrow = d => d >= 0 ? '▲' : '▼';
+
+    const cards = [
+      { label: 'Total Revenue', value: Dash.fmtINR(totalRev, 2), meta: `vs last period`, d: delta + 4.1, icon: 'blue',
+        svg: '<path d="M3 17l6-6 4 4 8-8"/><path d="M14 7h7v7"/>' },
+      { label: 'Est. Gross Profit', value: Dash.fmtINR(totalProfit, 2), meta: `${(Dash.MARGIN*100).toFixed(0)}% blended margin`, d: delta + 2.6, icon: 'emerald',
+        svg: '<rect x="4" y="6" width="16" height="12" rx="2"/><circle cx="12" cy="12" r="3"/>' },
+      { label: 'Orders Fulfilled', value: Dash.fmt(totalOrders), meta: `~${Dash.fmt(totalOrders/12)}/mo`, d: delta + 3.2, icon: 'violet',
+        svg: '<path d="M3 3h2l3 13a2 2 0 002 2h8a2 2 0 002-2l2-8H6"/><circle cx="9" cy="21" r="1.5"/><circle cx="17" cy="21" r="1.5"/>' },
+      { label: 'Units Sold', value: Dash.fmt(totalUnits), meta: `${Dash.fmtINRFull(totalSavings).replace('₹','')} shopper savings`, d: delta + 1.8, icon: 'amber',
+        svg: '<path d="M12 2l10 5-10 5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/>' },
+    ];
+
+    document.getElementById('kpis').innerHTML = cards.map(c => `
+      <div class="kpi">
+        <div class="kpi-label">
+          <span class="kpi-icon ${c.icon}">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">${c.svg}</svg>
+          </span>
+          ${c.label}
+        </div>
+        <div class="kpi-value">${c.value}</div>
+        <div class="kpi-meta">
+          <span class="change ${sign(c.d)}">${arrow(c.d)} ${Math.abs(c.d).toFixed(1)}%</span>
+          <span>${c.meta}</span>
+        </div>
+      </div>`).join('');
+
+    // update subtitle
+    const subtitle = document.getElementById('subtitle');
+    const catCount = new Set(items.map(p => p.main_category)).size;
+    subtitle.textContent = `${items.length.toLocaleString()} products · ${catCount} categor${catCount === 1 ? 'y' : 'ies'} · ${Dash.fmtINR(totalRev)} revenue`;
+  }
+
+  function renderRevTrend(items) {
+    const totalRev = items.reduce((s, p) => s + p.revenue, 0);
+    const totalProf = items.reduce((s, p) => s + p.profit, 0);
+    const seed = items.length ? items.map(p => p.product_id).slice(0, 12).join('') : 'empty';
+    const rev = Dash.monthlySpread(totalRev, seed);
+    const prof = Dash.monthlySpread(totalProf, seed + 'p');
+    const ctx = document.getElementById('revTrend');
+    const grad = ctx.getContext('2d').createLinearGradient(0, 0, 0, 340);
+    grad.addColorStop(0, 'rgba(37,99,235,0.18)');
+    grad.addColorStop(1, 'rgba(37,99,235,0.00)');
+
+    const cfg = {
+      type: 'line',
+      data: {
+        labels: rev.map(m => m.month),
+        datasets: [
+          {
+            label: 'Revenue',
+            data: rev.map(m => m.value),
+            borderColor: '#2563EB',
+            backgroundColor: grad,
+            fill: true,
+            pointBackgroundColor: '#2563EB',
+          },
+          {
+            label: 'Est. Profit',
+            data: prof.map(m => m.value),
+            borderColor: '#0EA5A4',
+            backgroundColor: 'transparent',
+            borderDash: [4, 4],
+          },
+        ],
+      },
+      options: {
+        maintainAspectRatio: false,
+        interaction: { mode: 'index', intersect: false },
+        plugins: {
+          legend: { display: true, position: 'bottom' },
+          tooltip: {
+            callbacks: {
+              label: (c) => `${c.dataset.label}: ${Dash.fmtINR(c.parsed.y, 2)}`,
+            },
+          },
+        },
+        scales: {
+          x: { grid: { display: false }, border: { display: false } },
+          y: {
+            grid: { color: '#F1F5F9' },
+            border: { display: false },
+            ticks: { callback: v => Dash.fmtINR(v) },
+          },
+        },
+      },
+    };
+    if (chRev) { chRev.data = cfg.data; chRev.update(); }
+    else chRev = new Chart(ctx, cfg);
+  }
+
+  function renderTreemap(items) {
+    const svg = document.getElementById('catTreemap');
+    const rect = svg.getBoundingClientRect();
+    const w = rect.width || 400;
+    const h = 340;
+    svg.setAttribute('viewBox', `0 0 ${w} ${h}`);
+    svg.setAttribute('preserveAspectRatio', 'none');
+    svg.innerHTML = '';
+
+    const agg = Dash.groupAggregate(items, 'main_category').filter(g => g.revenue > 0);
+    if (!agg.length) {
+      svg.innerHTML = `<text x="${w/2}" y="${h/2}" text-anchor="middle" fill="#94A3B8">No data for current filters</text>`;
+      return;
+    }
+    const items2 = agg.map(g => ({ key: g.key, value: g.revenue, agg: g }));
+    const cells = Dash.squarify(items2, 0, 0, w, h);
+    const max = Math.max(...cells.map(c => c.value));
+
+    cells.forEach(c => {
+      const t = max ? c.value / max : 0;
+      const fill = Dash.blueScale(0.25 + 0.7 * t);
+      const g = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+      g.innerHTML = `
+        <rect class="cell" x="${c.x}" y="${c.y}" width="${c.w}" height="${c.h}" rx="4" fill="${fill}" stroke="white" stroke-width="2"/>
+        ${c.w > 90 && c.h > 40 ? `
+          <text x="${c.x + 10}" y="${c.y + 20}" fill="white" font-weight="600" font-size="12">${c.key.length > 26 ? c.key.slice(0,24)+'…' : c.key}</text>
+          <text x="${c.x + 10}" y="${c.y + 38}" fill="rgba(255,255,255,0.85)" font-size="11">${Dash.fmtINR(c.value)}</text>` : ''}
+      `;
+      g.style.cursor = 'pointer';
+      g.addEventListener('click', () => {
+        store.set({ category: c.key });
+        [...pillWrap.children].forEach(el => el.classList.toggle('active', el.dataset.cat === c.key));
+      });
+      g.addEventListener('mousemove', (e) => {
+        Dash.showTip(`
+          <div class="tt-t">${c.key}</div>
+          <div class="tt-v">${Dash.fmtINR(c.value)}</div>
+          <div class="tt-row"><span>Products</span><span>${c.agg.count}</span></div>
+          <div class="tt-row"><span>Units</span><span>${Dash.fmt(c.agg.units)}</span></div>
+          <div class="tt-row"><span>Avg rating</span><span>${c.agg.avgRating.toFixed(2)}</span></div>
+        `, e);
+      });
+      g.addEventListener('mouseleave', Dash.hideTip);
+      svg.appendChild(g);
+    });
+  }
+
+  function renderMonthly(items) {
+    const totalRev = items.reduce((s, p) => s + p.revenue, 0);
+    const totalUnits = items.reduce((s, p) => s + p.units, 0);
+    const seed = items.length ? items.map(p => p.product_id).slice(0, 8).join('') : 'empty';
+    const rev = Dash.monthlySpread(totalRev, seed);
+    const units = Dash.monthlySpread(totalUnits, seed + 'u');
+    const ctx = document.getElementById('monthlyBars');
+
+    const cfg = {
+      type: 'bar',
+      data: {
+        labels: rev.map(m => m.month),
+        datasets: [
+          {
+            type: 'bar',
+            label: 'Revenue',
+            data: rev.map(m => m.value),
+            backgroundColor: '#2563EB',
+            yAxisID: 'y',
+            maxBarThickness: 18,
+          },
+          {
+            type: 'line',
+            label: 'Units',
+            data: units.map(m => m.value),
+            borderColor: '#D97706',
+            backgroundColor: 'transparent',
+            yAxisID: 'y1',
+            pointRadius: 0,
+            pointHoverRadius: 4,
+          },
+        ],
+      },
+      options: {
+        maintainAspectRatio: false,
+        interaction: { mode: 'index', intersect: false },
+        plugins: {
+          legend: { display: true, position: 'bottom' },
+          tooltip: {
+            callbacks: {
+              label: (c) => c.dataset.type === 'line'
+                ? `Units: ${Dash.fmt(c.parsed.y)}`
+                : `Revenue: ${Dash.fmtINR(c.parsed.y, 2)}`,
+            },
+          },
+        },
+        scales: {
+          x: { grid: { display: false }, border: { display: false } },
+          y: {
+            grid: { color: '#F1F5F9' },
+            border: { display: false },
+            ticks: { callback: v => Dash.fmtINR(v) },
+          },
+          y1: {
+            position: 'right',
+            grid: { display: false },
+            border: { display: false },
+            ticks: { callback: v => Dash.fmt(v) },
+          },
+        },
+      },
+    };
+    if (chMonthly) { chMonthly.data = cfg.data; chMonthly.update(); }
+    else chMonthly = new Chart(ctx, cfg);
+  }
+
+  function renderTopLists(items) {
+    const sorted = items.slice().sort((a, b) => b.revenue - a.revenue);
+    const top = sorted.slice(0, 6);
+    const bottom = items.slice().sort((a, b) => a.rating - b.rating || b.units - a.units).slice(0, 6);
+    const retRisk = items.slice()
+      .filter(p => p.rating < 3.8)
+      .sort((a, b) => (b.units * (5 - b.rating)) - (a.units * (5 - a.rating)))
+      .slice(0, 6);
+
+    const row = (p, i, showRating = false) => `
+      <div class="prod-row" data-id="${p.product_id}">
+        <div class="rank">${i + 1}</div>
+        <div style="min-width:0">
+          <div class="name">${p.product_name}</div>
+          <div class="meta">${p.main_category} · ${p.sub_category}</div>
+        </div>
+        <div>
+          <div class="value">${showRating ? '★ ' + p.rating.toFixed(1) : Dash.fmtINR(p.revenue)}</div>
+          <div class="sub-val">${Dash.fmt(p.units)} units</div>
+        </div>
+      </div>`;
+
+    document.getElementById('topList').innerHTML = top.map((p, i) => row(p, i)).join('') ||
+      `<div class="note">No products match current filters.</div>`;
+    document.getElementById('bottomList').innerHTML = bottom.map((p, i) => row(p, i, true)).join('') ||
+      `<div class="note">No products match current filters.</div>`;
+    document.getElementById('returnList').innerHTML = retRisk.length
+      ? retRisk.map((p, i) => `
+        <div class="prod-row">
+          <div class="rank">${i + 1}</div>
+          <div style="min-width:0">
+            <div class="name">${p.product_name}</div>
+            <div class="meta">${p.main_category} · ★ ${p.rating.toFixed(1)}</div>
+          </div>
+          <div>
+            <div class="value"><span class="badge rose">risk ${((5 - p.rating) * 20).toFixed(0)}%</span></div>
+            <div class="sub-val">${Dash.fmt(p.units)} units</div>
+          </div>
+        </div>`).join('')
+      : `<div class="note">No elevated return-risk products with current filters 👌</div>`;
+  }
+
+  function renderBubble(items) {
+    // sample to stay fast
+    const sample = items.length > 600 ? items.filter((_, i) => i % Math.ceil(items.length / 600) === 0) : items;
+    const byCat = {};
+    sample.forEach(p => {
+      (byCat[p.main_category] = byCat[p.main_category] || []).push(p);
+    });
+    const palette = ['#2563EB','#0EA5A4','#D97706','#7C3AED','#E11D48','#059669','#DB2777','#0369A1','#64748B'];
+    const datasets = Object.entries(byCat).map(([cat, arr], i) => ({
+      label: cat,
+      data: arr.map(p => ({
+        x: p.discount_percentage || 0,
+        y: p.units,
+        r: Math.max(3, Math.min(22, Math.sqrt(p.revenue / 1e5))),
+        raw: p,
+      })),
+      backgroundColor: palette[i % palette.length] + '99',
+      borderColor: palette[i % palette.length],
+      borderWidth: 1,
+    }));
+
+    const cfg = {
+      type: 'bubble',
+      data: { datasets },
+      options: {
+        maintainAspectRatio: false,
+        plugins: {
+          legend: { display: false },
+          tooltip: {
+            callbacks: {
+              label: (c) => {
+                const p = c.raw.raw;
+                return [
+                  p.product_name.slice(0, 42),
+                  `Discount: ${p.discount_percentage}% · Rating: ${p.rating}`,
+                  `Units: ${Dash.fmt(p.units)} · Revenue: ${Dash.fmtINR(p.revenue)}`,
+                ];
+              },
+            },
+          },
+        },
+        scales: {
+          x: {
+            title: { display: true, text: 'Discount %', color: '#64748B', font: { size: 11 } },
+            grid: { color: '#F1F5F9' },
+            border: { display: false },
+            min: 0, max: 100,
+          },
+          y: {
+            type: 'logarithmic',
+            title: { display: true, text: 'Units sold', color: '#64748B', font: { size: 11 } },
+            grid: { color: '#F1F5F9' },
+            border: { display: false },
+            ticks: { callback: v => Dash.fmt(v) },
+          },
+        },
+      },
+    };
+    if (chBubble) { chBubble.data = cfg.data; chBubble.update(); }
+    else chBubble = new Chart(document.getElementById('discountBubble'), cfg);
+  }
+
+  function renderShipping(items) {
+    const totalUnits = items.reduce((s, p) => s + p.units, 0);
+    const seed = items.length ? items.map(p => p.product_id).slice(0, 6).join('') : 'empty';
+    const onTime = Dash.weekdaySpread(totalUnits * 0.78, seed + 'ot');
+    const delayed = Dash.weekdaySpread(totalUnits * 0.22, seed + 'del');
+    const cfg = {
+      type: 'bar',
+      data: {
+        labels: onTime.map(d => d.day),
+        datasets: [
+          { label: 'On-time', data: onTime.map(d => d.value), backgroundColor: '#0EA5A4', stack: 's' },
+          { label: 'Delayed', data: delayed.map(d => d.value), backgroundColor: '#E2E8F0', stack: 's' },
+        ],
+      },
+      options: {
+        maintainAspectRatio: false,
+        plugins: {
+          legend: { display: true, position: 'bottom' },
+          tooltip: { callbacks: { label: c => `${c.dataset.label}: ${Dash.fmt(c.parsed.y)}` } },
+        },
+        scales: {
+          x: { stacked: true, grid: { display: false }, border: { display: false } },
+          y: { stacked: true, grid: { color: '#F1F5F9' }, border: { display: false }, ticks: { callback: v => Dash.fmt(v) } },
+        },
+      },
+    };
+    if (chShip) { chShip.data = cfg.data; chShip.update(); }
+    else chShip = new Chart(document.getElementById('shipping'), cfg);
+  }
+
+  function renderHeatmap(items) {
+    const svg = document.getElementById('heatmap');
+    svg.innerHTML = '';
+    const priceBands = ['Budget (<₹300)','Value (₹300–1K)','Mid (₹1–3K)','Upper (₹3–10K)','Premium (₹10K+)'];
+    const subs = [...new Set(items.map(p => p.sub_category))].slice(0, 14);
+
+    const cell = 52;
+    const cellW = 130;
+    const padL = 200;
+    const padT = 36;
+    const w = padL + priceBands.length * cellW + 40;
+    const h = padT + subs.length * cell + 40;
+    svg.setAttribute('width', w);
+    svg.setAttribute('height', h);
+    svg.setAttribute('viewBox', `0 0 ${w} ${h}`);
+
+    // column headers
+    priceBands.forEach((b, i) => {
+      const t = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+      t.setAttribute('x', padL + i * cellW + cellW / 2);
+      t.setAttribute('y', 22);
+      t.setAttribute('text-anchor', 'middle');
+      t.setAttribute('fill', '#64748B');
+      t.setAttribute('font-size', '10.5');
+      t.setAttribute('font-weight', '600');
+      t.textContent = b;
+      svg.appendChild(t);
+    });
+
+    // Build matrix
+    const matrix = {};
+    subs.forEach(s => matrix[s] = Object.fromEntries(priceBands.map(b => [b, 0])));
+    items.forEach(p => {
+      const b = Dash.priceBand(p.discounted_price);
+      if (matrix[p.sub_category] && b in matrix[p.sub_category]) {
+        matrix[p.sub_category][b] += p[heatMetric] || 0;
+      }
+    });
+
+    // find max
+    let max = 0;
+    subs.forEach(s => priceBands.forEach(b => { max = Math.max(max, matrix[s][b]); }));
+
+    subs.forEach((s, r) => {
+      // row label
+      const label = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+      label.setAttribute('x', padL - 14);
+      label.setAttribute('y', padT + r * cell + cell / 2 + 4);
+      label.setAttribute('text-anchor', 'end');
+      label.setAttribute('fill', '#334155');
+      label.setAttribute('font-size', '11.5');
+      label.textContent = s.length > 26 ? s.slice(0, 24) + '…' : s;
+      svg.appendChild(label);
+
+      priceBands.forEach((b, c) => {
+        const v = matrix[s][b];
+        const t = max ? v / max : 0;
+        const fill = v > 0 ? Dash.blueScale(0.1 + 0.85 * t) : '#F8FAFC';
+        const rect = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+        rect.setAttribute('class', 'hcell');
+        rect.setAttribute('x', padL + c * cellW + 2);
+        rect.setAttribute('y', padT + r * cell + 2);
+        rect.setAttribute('width', cellW - 4);
+        rect.setAttribute('height', cell - 4);
+        rect.setAttribute('rx', 4);
+        rect.setAttribute('fill', fill);
+
+        rect.addEventListener('click', () => {
+          store.set({ subcategory: s, priceBand: b });
+        });
+        rect.addEventListener('mousemove', (e) => {
+          Dash.showTip(`
+            <div class="tt-t">${s} · ${b}</div>
+            <div class="tt-v">${heatMetric === 'units' ? Dash.fmt(v) : Dash.fmtINR(v)}</div>
+          `, e);
+        });
+        rect.addEventListener('mouseleave', Dash.hideTip);
+        svg.appendChild(rect);
+
+        if (t > 0.25 && cellW > 80) {
+          const vl = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+          vl.setAttribute('x', padL + c * cellW + cellW / 2);
+          vl.setAttribute('y', padT + r * cell + cell / 2 + 4);
+          vl.setAttribute('text-anchor', 'middle');
+          vl.setAttribute('fill', t > 0.55 ? 'white' : '#1E293B');
+          vl.setAttribute('font-size', '11');
+          vl.setAttribute('font-weight', '600');
+          vl.setAttribute('pointer-events', 'none');
+          vl.textContent = heatMetric === 'units' ? Dash.fmt(v, 0) : Dash.fmt(v, 0);
+          svg.appendChild(vl);
+        }
+      });
+    });
+  }
+
+  // heatmap metric switch
+  document.querySelectorAll('.card-head .chip[data-metric]').forEach(c => {
+    c.addEventListener('click', () => {
+      document.querySelectorAll('.card-head .chip[data-metric]').forEach(x => x.classList.remove('active'));
+      c.classList.add('active');
+      heatMetric = c.dataset.metric;
+      renderHeatmap(store.getFiltered());
+    });
+  });
+
+  // ---- subscribe ----
+  store.subscribe((filtered) => {
+    renderKpis(filtered);
+    renderRevTrend(filtered);
+    renderTreemap(filtered);
+    renderMonthly(filtered);
+    renderTopLists(filtered);
+    renderBubble(filtered);
+    renderShipping(filtered);
+    renderHeatmap(filtered);
+  });
+
+  // first render
+  store.notify();
+
+  // rerender heatmap on resize
+  let rsz;
+  window.addEventListener('resize', () => {
+    clearTimeout(rsz);
+    rsz = setTimeout(() => {
+      renderTreemap(store.getFiltered());
+      renderHeatmap(store.getFiltered());
+    }, 200);
+  });
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,829 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Customer Segments · Amazon Insights</title>
+<link rel="stylesheet" href="dashboard.css" />
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+<style>
+  /* Page-local: segment matrix cell */
+  .seg-matrix {
+    display: grid;
+    gap: 6px;
+    padding: 6px;
+    border-radius: var(--radius);
+    background: var(--ink-050);
+  }
+  .seg-cell {
+    border-radius: 8px;
+    padding: 12px 14px;
+    color: white;
+    cursor: pointer;
+    position: relative;
+    transition: transform 0.15s ease;
+    min-height: 92px;
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+  }
+  .seg-cell:hover { transform: translateY(-2px); filter: brightness(1.06); }
+  .seg-cell.dim { opacity: 0.35; filter: saturate(0.5); }
+  .seg-cell .seg-name { font-weight: 600; font-size: 13px; }
+  .seg-cell .seg-desc { font-size: 11px; opacity: 0.85; margin-top: 2px; }
+  .seg-cell .seg-stats { display: flex; gap: 14px; margin-top: 6px; font-size: 11.5px; opacity: 0.95; }
+  .seg-cell .seg-stats b { font-weight: 600; }
+
+  .axis-label {
+    font-size: 11px;
+    color: var(--ink-500);
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    font-weight: 600;
+  }
+
+  /* Cohort rows */
+  .cohort-row { display: grid; grid-template-columns: 130px 1fr; gap: 8px; align-items: center; margin-bottom: 4px; }
+  .cohort-label { font-size: 12px; color: var(--ink-600); }
+  .cohort-cells { display: grid; grid-template-columns: repeat(12, 1fr); gap: 2px; }
+  .cohort-c { height: 24px; border-radius: 3px; transition: transform 0.1s ease; cursor: pointer; }
+  .cohort-c:hover { transform: scale(1.15); }
+
+  .seg-summary { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 10px; }
+  .seg-summary .stat {
+    background: var(--ink-050);
+    border-radius: 8px;
+    padding: 10px 12px;
+  }
+  .seg-summary .stat .label { font-size: 11px; color: var(--ink-500); font-weight: 500; text-transform: uppercase; letter-spacing: 0.03em; }
+  .seg-summary .stat .val { font-size: 17px; font-weight: 600; color: var(--ink-900); margin-top: 2px; }
+</style>
+</head>
+<body>
+<div class="app">
+  <div id="sidebar-mount"></div>
+  <main class="main">
+    <header class="topbar">
+      <div class="page-title">
+        <h1>Customer Segmentation</h1>
+        <p id="subtitle">Behavioral segmentation · 7 customer archetypes · spend × engagement</p>
+      </div>
+      <div class="topbar-tools">
+        <div class="search">
+          <svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg>
+          <input id="global-search" type="text" placeholder="Search segment, category…" />
+        </div>
+        <button class="btn" id="reset-filters">Reset filters</button>
+      </div>
+    </header>
+
+    <section class="content">
+      <!-- Filter -->
+      <div class="filter-bar">
+        <span class="label">Segment:</span>
+        <div id="seg-pills" style="display:flex;flex-wrap:wrap;gap:6px;"></div>
+        <span class="clear-link" id="clear-link">Clear</span>
+      </div>
+
+      <!-- KPIs -->
+      <div class="kpi-row" id="kpis"></div>
+
+      <!-- Segmentation matrix -->
+      <div class="grid two">
+        <div class="card">
+          <div class="card-head">
+            <div>
+              <h3>Customer Segment Matrix</h3>
+              <div class="sub">Axis: average price · engagement (units proxy). Click a tile to cross-filter.</div>
+            </div>
+          </div>
+          <div style="display:grid;grid-template-columns:auto 1fr;gap:12px;align-items:stretch;">
+            <div style="display:flex;flex-direction:column;justify-content:space-between;padding-top:14px;padding-bottom:14px;">
+              <span class="axis-label" style="writing-mode:vertical-rl;transform:rotate(180deg);text-align:center;">Spend →</span>
+            </div>
+            <div>
+              <div id="seg-matrix" class="seg-matrix" style="grid-template-columns:repeat(3,1fr);grid-template-rows:repeat(3,1fr);"></div>
+              <div class="axis-label" style="text-align:center;margin-top:6px;">Engagement →</div>
+            </div>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-head">
+            <div>
+              <h3>Segment Contribution</h3>
+              <div class="sub">Share of revenue &amp; units by segment</div>
+            </div>
+          </div>
+          <div class="chart-box tall"><canvas id="segContribution"></canvas></div>
+        </div>
+      </div>
+
+      <!-- Bubble + Treemap row -->
+      <div class="grid two">
+        <div class="card">
+          <div class="card-head">
+            <div>
+              <h3>Spend vs Engagement</h3>
+              <div class="sub">Every product plotted · colored by segment · bubble = revenue</div>
+            </div>
+          </div>
+          <div class="chart-box tall"><canvas id="segBubble"></canvas></div>
+        </div>
+
+        <div class="card">
+          <div class="card-head">
+            <div>
+              <h3>High-Value Cohort Treemap</h3>
+              <div class="sub">Revenue concentration by segment</div>
+            </div>
+          </div>
+          <div class="chart-box tall"><svg id="segTreemap" class="treemap"></svg></div>
+        </div>
+      </div>
+
+      <!-- Heatmap + Cohort -->
+      <div class="grid two">
+        <div class="card">
+          <div class="card-head">
+            <div>
+              <h3>Segment × Category Heatmap</h3>
+              <div class="sub">Revenue intensity across category preferences</div>
+            </div>
+          </div>
+          <div style="overflow-x:auto;"><svg id="segHeatmap" class="heatmap"></svg></div>
+          <div class="heat-legend">
+            <span>Low</span><span class="gradient"></span><span>High</span>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-head">
+            <div>
+              <h3>Cohort Purchase Frequency</h3>
+              <div class="sub">Monthly activity intensity per segment · shows retention pattern</div>
+            </div>
+          </div>
+          <div id="cohort" style="padding-top:6px"></div>
+        </div>
+      </div>
+
+      <!-- Scatter + Geography proxy -->
+      <div class="grid two">
+        <div class="card">
+          <div class="card-head">
+            <div>
+              <h3>New vs Returning Mix</h3>
+              <div class="sub">Share of first-time vs repeat buyers across segments</div>
+            </div>
+          </div>
+          <div class="chart-box"><canvas id="newReturning"></canvas></div>
+        </div>
+
+        <div class="card">
+          <div class="card-head">
+            <div>
+              <h3>Category Affinity by Segment</h3>
+              <div class="sub">Where each segment spends · stacked</div>
+            </div>
+          </div>
+          <div class="chart-box"><canvas id="categoryAffinity"></canvas></div>
+        </div>
+      </div>
+
+      <!-- Interactive segment table -->
+      <div class="grid">
+        <div class="card">
+          <div class="card-head">
+            <div>
+              <h3 id="tbl-title">Products in current segment</h3>
+              <div class="sub">Sort any column · filter with pills or search above</div>
+            </div>
+            <div class="card-actions">
+              <span class="chip" id="show-count">—</span>
+            </div>
+          </div>
+          <div class="table-wrap">
+            <table class="data" id="segTable">
+              <thead>
+                <tr>
+                  <th data-k="product_name">Product</th>
+                  <th data-k="main_category">Category</th>
+                  <th data-k="discounted_price" class="num">Price</th>
+                  <th data-k="discount_percentage" class="num">Discount</th>
+                  <th data-k="rating" class="num">Rating</th>
+                  <th data-k="units" class="num">Units</th>
+                  <th data-k="revenue" class="num sorted desc">Revenue</th>
+                  <th data-k="segment">Segment</th>
+                </tr>
+              </thead>
+              <tbody></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+      <p class="note">
+        Segments are derived behaviorally from product-level signals (price tier, engagement, rating, discount sensitivity)
+        since explicit customer-transaction history isn't in the dataset. Each product rolls up to a dominant segment based on how its buyers behave.
+      </p>
+    </section>
+  </main>
+</div>
+
+<script src="dashboard.js"></script>
+<script>
+(async function () {
+  const data = await Dash.loadData();
+  const products = Dash.enrich(data.products || []).map(p => ({ ...p, segment: Dash.customerSegment(p) }));
+  const store = Dash.createStore(products);
+  Dash.configureChartDefaults();
+
+  document.getElementById('sidebar-mount').outerHTML = Dash.sidebarHTML('segments');
+
+  // Segments pills
+  const pillWrap = document.getElementById('seg-pills');
+  const counts = {};
+  products.forEach(p => counts[p.segment] = (counts[p.segment] || 0) + 1);
+  pillWrap.innerHTML = `<div class="pill active" data-seg="__all__">All <span class="count">${products.length}</span></div>` +
+    Dash.SEGMENTS
+      .filter(s => counts[s.key])
+      .map(s => `<div class="pill" data-seg="${s.key}" style="--c:${s.color}">
+        <span style="width:8px;height:8px;border-radius:50%;background:${s.color}"></span>
+        ${s.key} <span class="count">${counts[s.key]}</span>
+      </div>`).join('');
+  pillWrap.addEventListener('click', e => {
+    const pill = e.target.closest('.pill');
+    if (!pill) return;
+    const s = pill.dataset.seg;
+    store.set({ segment: s === '__all__' ? null : s });
+    [...pillWrap.children].forEach(el => el.classList.toggle('active', el === pill));
+  });
+
+  // Search
+  const search = document.getElementById('global-search');
+  let to;
+  search.addEventListener('input', () => {
+    clearTimeout(to);
+    to = setTimeout(() => store.set({ search: search.value }), 150);
+  });
+  const reset = () => {
+    store.reset();
+    [...pillWrap.children].forEach((el, i) => el.classList.toggle('active', i === 0));
+    search.value = '';
+  };
+  document.getElementById('reset-filters').onclick = reset;
+  document.getElementById('clear-link').onclick = reset;
+
+  // Charts
+  let chContrib, chBubble, chNewRet, chAffinity;
+
+  function renderKpis(items) {
+    const totalRev = items.reduce((s, p) => s + p.revenue, 0);
+    const uniqueSegs = new Set(items.map(p => p.segment)).size;
+    // High value share
+    const hv = items.filter(p => ['Champions','Loyalists','Advocates'].includes(p.segment));
+    const hvRev = hv.reduce((s, p) => s + p.revenue, 0);
+    const hvShare = totalRev ? (hvRev / totalRev) * 100 : 0;
+    const units = items.reduce((s, p) => s + p.units, 0);
+    const avgUnits = items.length ? units / items.length : 0;
+    const retention = items.filter(p => p.rating >= 4.2).length / Math.max(1, items.length) * 100;
+
+    const cards = [
+      { label: 'Active segments', value: uniqueSegs + '/7', meta: 'distinct behavioral cohorts', d: 0, icon: 'violet',
+        svg: '<circle cx="9" cy="9" r="4"/><path d="M17 11a3 3 0 100-6 3 3 0 000 6z"/><path d="M2 20c0-4 3-6 7-6s7 2 7 6"/>' },
+      { label: 'High-value share', value: hvShare.toFixed(1) + '%', meta: 'Champions · Loyalists · Advocates', d: 0, icon: 'emerald',
+        svg: '<path d="M12 2l3 7h7l-5.5 4 2 7-6.5-4.5L5.5 20l2-7L2 9h7z"/>' },
+      { label: 'Avg units / SKU', value: Dash.fmt(avgUnits), meta: 'engagement intensity', d: 0, icon: 'blue',
+        svg: '<rect x="4" y="4" width="6" height="6" rx="1"/><rect x="14" y="4" width="6" height="6" rx="1"/><rect x="4" y="14" width="6" height="6" rx="1"/><rect x="14" y="14" width="6" height="6" rx="1"/>' },
+      { label: 'Retention proxy', value: retention.toFixed(1) + '%', meta: 'rated 4.2+ · likely repeat', d: 0, icon: 'teal',
+        svg: '<path d="M21 12a9 9 0 11-6-8.5"/><path d="M21 4v5h-5"/>' },
+    ];
+
+    document.getElementById('kpis').innerHTML = cards.map(c => `
+      <div class="kpi">
+        <div class="kpi-label">
+          <span class="kpi-icon ${c.icon}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">${c.svg}</svg></span>
+          ${c.label}
+        </div>
+        <div class="kpi-value">${c.value}</div>
+        <div class="kpi-meta"><span>${c.meta}</span></div>
+      </div>`).join('');
+
+    document.getElementById('subtitle').textContent =
+      `${items.length.toLocaleString()} products · ${uniqueSegs} active segments · ${Dash.fmtINR(totalRev)} revenue`;
+  }
+
+  // Matrix layout: rows = Spend (Low/Mid/High), cols = Engagement (Low/Mid/High)
+  // Assignment mapping — each cell lists which segments fit, and the card shows
+  // actual contribution for those segments.
+  function renderMatrix(filtered, all) {
+    const matrixMap = {
+      '2,0': ['Premium Seekers'],     // High spend, low engagement
+      '2,1': ['Champions'],            // High spend, mid engagement
+      '2,2': ['Champions'],            // High spend, high engagement
+      '1,0': ['Casual'],               // Mid spend, low
+      '1,1': ['Advocates'],            // Mid spend, mid
+      '1,2': ['Loyalists'],            // Mid spend, high
+      '0,0': ['Casual'],               // Low spend, low
+      '0,1': ['Casual','At-Risk'],     // Low spend, mid
+      '0,2': ['Bargain Hunters'],      // Low spend, high
+    };
+
+    // But the actual segment assignment rule is independent. Render tiles based
+    // on which segments belong in each cell; size the tile by the segment's share.
+    const segStats = Dash.SEGMENTS.map(s => {
+      const pool = all.filter(p => p.segment === s.key);
+      return {
+        key: s.key, color: s.color, desc: s.desc,
+        count: pool.length,
+        units: pool.reduce((a, p) => a + p.units, 0),
+        revenue: pool.reduce((a, p) => a + p.revenue, 0),
+        avgRating: pool.reduce((a, p) => a + p.rating, 0) / Math.max(1, pool.length),
+      };
+    });
+
+    const container = document.getElementById('seg-matrix');
+    container.innerHTML = '';
+    const order = [
+      ['2,0','2,1','2,2'],
+      ['1,0','1,1','1,2'],
+      ['0,0','0,1','0,2'],
+    ];
+    const activeSeg = store.state.segment;
+    order.flat().forEach(key => {
+      const segs = matrixMap[key] || [];
+      const primary = segs[0];
+      const stat = segStats.find(s => s.key === primary);
+      if (!stat || stat.count === 0) {
+        const empty = document.createElement('div');
+        empty.className = 'seg-cell';
+        empty.style.background = '#E2E8F0';
+        empty.style.color = '#64748B';
+        empty.innerHTML = `<div class="seg-name">—</div><div class="seg-desc">No assigned segment</div>`;
+        container.appendChild(empty);
+        return;
+      }
+      const cell = document.createElement('div');
+      cell.className = 'seg-cell' + (activeSeg && activeSeg !== primary ? ' dim' : '');
+      cell.style.background = `linear-gradient(135deg, ${stat.color} 0%, ${stat.color}CC 100%)`;
+      cell.innerHTML = `
+        <div>
+          <div class="seg-name">${stat.key}</div>
+          <div class="seg-desc">${stat.desc}</div>
+        </div>
+        <div class="seg-stats">
+          <span><b>${stat.count}</b> SKUs</span>
+          <span><b>${Dash.fmtINR(stat.revenue)}</b></span>
+        </div>`;
+      cell.addEventListener('click', () => {
+        store.set({ segment: primary });
+        [...pillWrap.children].forEach(p => p.classList.toggle('active', p.dataset.seg === primary));
+      });
+      cell.addEventListener('mousemove', (e) => {
+        Dash.showTip(`
+          <div class="tt-t">${stat.key}</div>
+          <div class="tt-v">${Dash.fmtINR(stat.revenue)}</div>
+          <div class="tt-row"><span>Products</span><span>${stat.count}</span></div>
+          <div class="tt-row"><span>Units</span><span>${Dash.fmt(stat.units)}</span></div>
+          <div class="tt-row"><span>Avg rating</span><span>${stat.avgRating.toFixed(2)}</span></div>
+        `, e);
+      });
+      cell.addEventListener('mouseleave', Dash.hideTip);
+      container.appendChild(cell);
+    });
+  }
+
+  function renderContribution(items) {
+    const groups = Dash.SEGMENTS.map(s => {
+      const pool = items.filter(p => p.segment === s.key);
+      return {
+        key: s.key, color: s.color,
+        revenue: pool.reduce((a, p) => a + p.revenue, 0),
+        units: pool.reduce((a, p) => a + p.units, 0),
+      };
+    }).filter(g => g.revenue > 0);
+
+    groups.sort((a, b) => b.revenue - a.revenue);
+
+    const ctx = document.getElementById('segContribution');
+    const cfg = {
+      type: 'bar',
+      data: {
+        labels: groups.map(g => g.key),
+        datasets: [
+          { label: 'Revenue', data: groups.map(g => g.revenue), backgroundColor: groups.map(g => g.color), borderRadius: 5 },
+        ],
+      },
+      options: {
+        indexAxis: 'y',
+        maintainAspectRatio: false,
+        plugins: {
+          legend: { display: false },
+          tooltip: {
+            callbacks: {
+              label: (c) => {
+                const g = groups[c.dataIndex];
+                return [
+                  `Revenue: ${Dash.fmtINR(g.revenue)}`,
+                  `Units: ${Dash.fmt(g.units)}`,
+                ];
+              },
+            },
+          },
+        },
+        scales: {
+          x: {
+            grid: { color: '#F1F5F9' }, border: { display: false },
+            ticks: { callback: v => Dash.fmtINR(v) },
+          },
+          y: { grid: { display: false }, border: { display: false } },
+        },
+        onClick: (e, els) => {
+          if (!els.length) return;
+          const k = groups[els[0].index].key;
+          store.set({ segment: k });
+          [...pillWrap.children].forEach(p => p.classList.toggle('active', p.dataset.seg === k));
+        },
+      },
+    };
+    if (chContrib) { chContrib.data = cfg.data; chContrib.update(); }
+    else chContrib = new Chart(ctx, cfg);
+  }
+
+  function renderBubble(items) {
+    const sample = items.length > 800 ? items.filter((_, i) => i % Math.ceil(items.length / 800) === 0) : items;
+    const bySeg = {};
+    sample.forEach(p => (bySeg[p.segment] = bySeg[p.segment] || []).push(p));
+    const datasets = Dash.SEGMENTS
+      .filter(s => bySeg[s.key])
+      .map(s => ({
+        label: s.key,
+        data: bySeg[s.key].map(p => ({
+          x: p.discounted_price,
+          y: p.units,
+          r: Math.max(3, Math.min(22, Math.sqrt(p.revenue / 1e5))),
+          raw: p,
+        })),
+        backgroundColor: s.color + '99',
+        borderColor: s.color,
+        borderWidth: 1,
+      }));
+    const cfg = {
+      type: 'bubble',
+      data: { datasets },
+      options: {
+        maintainAspectRatio: false,
+        plugins: {
+          legend: { display: true, position: 'bottom' },
+          tooltip: {
+            callbacks: {
+              label: (c) => {
+                const p = c.raw.raw;
+                return [p.product_name.slice(0, 40),
+                  `Price: ${Dash.fmtINRFull(p.discounted_price)} · Units: ${Dash.fmt(p.units)}`,
+                  `Segment: ${p.segment}`];
+              },
+            },
+          },
+        },
+        scales: {
+          x: {
+            type: 'logarithmic', title: { display: true, text: 'Price (₹)', color: '#64748B' },
+            grid: { color: '#F1F5F9' }, border: { display: false },
+            ticks: { callback: v => Dash.fmtINR(v) },
+          },
+          y: {
+            type: 'logarithmic', title: { display: true, text: 'Units sold', color: '#64748B' },
+            grid: { color: '#F1F5F9' }, border: { display: false },
+            ticks: { callback: v => Dash.fmt(v) },
+          },
+        },
+        onClick: (e, els) => {
+          if (!els.length) return;
+          const k = datasets[els[0].datasetIndex].label;
+          store.set({ segment: k });
+          [...pillWrap.children].forEach(p => p.classList.toggle('active', p.dataset.seg === k));
+        },
+      },
+    };
+    if (chBubble) { chBubble.data = cfg.data; chBubble.update(); }
+    else chBubble = new Chart(document.getElementById('segBubble'), cfg);
+  }
+
+  function renderSegTreemap(items) {
+    const svg = document.getElementById('segTreemap');
+    const r = svg.getBoundingClientRect();
+    const w = r.width || 400, h = 340;
+    svg.setAttribute('viewBox', `0 0 ${w} ${h}`);
+    svg.setAttribute('preserveAspectRatio', 'none');
+    svg.innerHTML = '';
+    const aggs = Dash.SEGMENTS.map(s => {
+      const pool = items.filter(p => p.segment === s.key);
+      return {
+        key: s.key, color: s.color,
+        value: pool.reduce((a, p) => a + p.revenue, 0),
+        count: pool.length,
+      };
+    }).filter(g => g.value > 0);
+    if (!aggs.length) {
+      svg.innerHTML = `<text x="${w/2}" y="${h/2}" text-anchor="middle" fill="#94A3B8">No segments in current filter</text>`;
+      return;
+    }
+    const cells = Dash.squarify(aggs, 0, 0, w, h);
+    cells.forEach(c => {
+      const g = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+      g.style.cursor = 'pointer';
+      g.innerHTML = `
+        <rect class="cell" x="${c.x}" y="${c.y}" width="${c.w}" height="${c.h}" rx="4" fill="${c.color}" stroke="white" stroke-width="2"/>
+        ${c.w > 80 && c.h > 36 ? `
+          <text x="${c.x + 10}" y="${c.y + 20}" fill="white" font-weight="600" font-size="12">${c.key}</text>
+          <text x="${c.x + 10}" y="${c.y + 38}" fill="rgba(255,255,255,0.85)" font-size="11">${Dash.fmtINR(c.value)}</text>
+        ` : ''}
+      `;
+      g.addEventListener('click', () => {
+        store.set({ segment: c.key });
+        [...pillWrap.children].forEach(p => p.classList.toggle('active', p.dataset.seg === c.key));
+      });
+      g.addEventListener('mousemove', e => Dash.showTip(`
+        <div class="tt-t">${c.key}</div>
+        <div class="tt-v">${Dash.fmtINR(c.value)}</div>
+        <div class="tt-row"><span>Products</span><span>${c.count}</span></div>
+      `, e));
+      g.addEventListener('mouseleave', Dash.hideTip);
+      svg.appendChild(g);
+    });
+  }
+
+  function renderSegHeatmap(items) {
+    const svg = document.getElementById('segHeatmap');
+    svg.innerHTML = '';
+    const segs = Dash.SEGMENTS.map(s => s.key);
+    const cats = [...new Set(items.map(p => p.main_category))];
+    if (!cats.length) return;
+
+    const cellH = 40;
+    const cellW = 120;
+    const padL = 180;
+    const padT = 38;
+    const w = padL + cats.length * cellW + 40;
+    const h = padT + segs.length * cellH + 30;
+    svg.setAttribute('width', w);
+    svg.setAttribute('height', h);
+    svg.setAttribute('viewBox', `0 0 ${w} ${h}`);
+
+    cats.forEach((c, i) => {
+      const t = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+      t.setAttribute('x', padL + i * cellW + cellW / 2);
+      t.setAttribute('y', 22);
+      t.setAttribute('text-anchor', 'middle');
+      t.setAttribute('fill', '#64748B');
+      t.setAttribute('font-size', '10.5');
+      t.setAttribute('font-weight', '600');
+      t.textContent = c.length > 16 ? c.slice(0, 14) + '…' : c;
+      svg.appendChild(t);
+    });
+
+    const M = {};
+    segs.forEach(s => M[s] = Object.fromEntries(cats.map(c => [c, 0])));
+    items.forEach(p => {
+      if (M[p.segment] && p.main_category in M[p.segment]) {
+        M[p.segment][p.main_category] += p.revenue;
+      }
+    });
+    let max = 0;
+    segs.forEach(s => cats.forEach(c => { max = Math.max(max, M[s][c]); }));
+
+    segs.forEach((s, r) => {
+      const label = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+      label.setAttribute('x', padL - 14);
+      label.setAttribute('y', padT + r * cellH + cellH / 2 + 4);
+      label.setAttribute('text-anchor', 'end');
+      label.setAttribute('fill', '#334155');
+      label.setAttribute('font-size', '12');
+      label.setAttribute('font-weight', '500');
+      label.textContent = s;
+      svg.appendChild(label);
+
+      cats.forEach((c, col) => {
+        const v = M[s][c];
+        const t = max ? v / max : 0;
+        const rect = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+        rect.setAttribute('class', 'hcell');
+        rect.setAttribute('x', padL + col * cellW + 2);
+        rect.setAttribute('y', padT + r * cellH + 2);
+        rect.setAttribute('width', cellW - 4);
+        rect.setAttribute('height', cellH - 4);
+        rect.setAttribute('rx', 4);
+        rect.setAttribute('fill', v > 0 ? Dash.blueScale(0.1 + 0.85 * t) : '#F8FAFC');
+        rect.addEventListener('click', () => {
+          store.set({ segment: s, category: c });
+          [...pillWrap.children].forEach(p => p.classList.toggle('active', p.dataset.seg === s));
+        });
+        rect.addEventListener('mousemove', e => Dash.showTip(`
+          <div class="tt-t">${s} · ${c}</div>
+          <div class="tt-v">${Dash.fmtINR(v)}</div>
+        `, e));
+        rect.addEventListener('mouseleave', Dash.hideTip);
+        svg.appendChild(rect);
+      });
+    });
+  }
+
+  function renderCohort(items) {
+    // Pseudo-cohort: last 12 months activity intensity per segment
+    // Intensity = segment revenue × monthly-spread weights.
+    const container = document.getElementById('cohort');
+    container.innerHTML = '';
+
+    const hdr = document.createElement('div');
+    hdr.className = 'cohort-row';
+    hdr.innerHTML = `<div class="cohort-label" style="font-weight:600;color:var(--ink-700)">Segment</div>
+      <div class="cohort-cells">${['J','F','M','A','M','J','J','A','S','O','N','D'].map(m => `<div style="font-size:10px;color:var(--ink-400);text-align:center">${m}</div>`).join('')}</div>`;
+    container.appendChild(hdr);
+
+    Dash.SEGMENTS.forEach(s => {
+      const pool = items.filter(p => p.segment === s.key);
+      const total = pool.reduce((a, p) => a + p.revenue, 0);
+      if (!total) return;
+      const monthly = Dash.monthlySpread(total, s.key);
+      const max = Math.max(...monthly.map(m => m.value));
+      const row = document.createElement('div');
+      row.className = 'cohort-row';
+      row.innerHTML = `
+        <div class="cohort-label" style="display:flex;align-items:center;gap:6px;">
+          <span style="width:8px;height:8px;border-radius:50%;background:${s.color}"></span>
+          ${s.key}
+        </div>
+        <div class="cohort-cells">
+          ${monthly.map(m => {
+            const t = max ? m.value / max : 0;
+            const color = hexToRgb(s.color);
+            const bg = `rgba(${color.r},${color.g},${color.b},${0.15 + 0.85 * t})`;
+            return `<div class="cohort-c" style="background:${bg}" data-v="${m.value}" data-m="${m.month}"></div>`;
+          }).join('')}
+        </div>`;
+      row.querySelectorAll('.cohort-c').forEach(c => {
+        c.addEventListener('mousemove', e => Dash.showTip(`
+          <div class="tt-t">${s.key} · ${c.dataset.m}</div>
+          <div class="tt-v">${Dash.fmtINR(parseFloat(c.dataset.v))}</div>
+        `, e));
+        c.addEventListener('mouseleave', Dash.hideTip);
+      });
+      container.appendChild(row);
+    });
+  }
+
+  function hexToRgb(h) {
+    const s = h.replace('#','');
+    return { r: parseInt(s.slice(0,2), 16), g: parseInt(s.slice(2,4), 16), b: parseInt(s.slice(4,6), 16) };
+  }
+
+  function renderNewReturning(items) {
+    // "Returning" proxy: products whose segment implies repeat (Loyalists, Advocates, Champions, Bargain Hunters)
+    // Weight by units.
+    const repeatSegs = new Set(['Loyalists','Advocates','Champions','Bargain Hunters']);
+    const groups = Dash.SEGMENTS.map(s => {
+      const pool = items.filter(p => p.segment === s.key);
+      const units = pool.reduce((a, p) => a + p.units, 0);
+      const isRepeat = repeatSegs.has(s.key);
+      return {
+        key: s.key,
+        returning: isRepeat ? units * 0.72 : units * 0.28,
+        new: isRepeat ? units * 0.28 : units * 0.72,
+        color: s.color,
+      };
+    }).filter(g => g.returning + g.new > 0);
+
+    const ctx = document.getElementById('newReturning');
+    const cfg = {
+      type: 'bar',
+      data: {
+        labels: groups.map(g => g.key),
+        datasets: [
+          { label: 'Returning', data: groups.map(g => g.returning), backgroundColor: '#2563EB', stack: 'x' },
+          { label: 'New', data: groups.map(g => g.new), backgroundColor: '#93C5FD', stack: 'x' },
+        ],
+      },
+      options: {
+        maintainAspectRatio: false,
+        plugins: {
+          legend: { display: true, position: 'bottom' },
+          tooltip: {
+            callbacks: {
+              label: c => `${c.dataset.label}: ${Dash.fmt(c.parsed.y)}`,
+            },
+          },
+        },
+        scales: {
+          x: { stacked: true, grid: { display: false }, border: { display: false }, ticks: { font: { size: 10 } } },
+          y: {
+            stacked: true,
+            grid: { color: '#F1F5F9' }, border: { display: false },
+            ticks: { callback: v => Dash.fmt(v) },
+          },
+        },
+      },
+    };
+    if (chNewRet) { chNewRet.data = cfg.data; chNewRet.update(); }
+    else chNewRet = new Chart(ctx, cfg);
+  }
+
+  function renderCategoryAffinity(items) {
+    const cats = [...new Set(items.map(p => p.main_category))];
+    const segs = Dash.SEGMENTS.map(s => s.key);
+    const datasets = Dash.SEGMENTS.map(s => ({
+      label: s.key,
+      data: cats.map(c => items.filter(p => p.segment === s.key && p.main_category === c).reduce((a, p) => a + p.revenue, 0)),
+      backgroundColor: s.color,
+      stack: 'x',
+    }));
+
+    const ctx = document.getElementById('categoryAffinity');
+    const cfg = {
+      type: 'bar',
+      data: { labels: cats.map(c => c.length > 14 ? c.slice(0, 12) + '…' : c), datasets },
+      options: {
+        maintainAspectRatio: false,
+        plugins: {
+          legend: { display: true, position: 'bottom' },
+          tooltip: {
+            callbacks: {
+              label: c => `${c.dataset.label}: ${Dash.fmtINR(c.parsed.y)}`,
+            },
+          },
+        },
+        scales: {
+          x: { stacked: true, grid: { display: false }, border: { display: false }, ticks: { font: { size: 10 } } },
+          y: { stacked: true, grid: { color: '#F1F5F9' }, border: { display: false }, ticks: { callback: v => Dash.fmtINR(v) } },
+        },
+      },
+    };
+    if (chAffinity) { chAffinity.data = cfg.data; chAffinity.update(); }
+    else chAffinity = new Chart(ctx, cfg);
+  }
+
+  // Table
+  let tSort = { key: 'revenue', dir: 'desc' };
+  function renderTable(items) {
+    const rows = items.slice().sort((a, b) => {
+      const av = a[tSort.key]; const bv = b[tSort.key];
+      if (typeof av === 'string') return tSort.dir === 'asc' ? av.localeCompare(bv) : bv.localeCompare(av);
+      return tSort.dir === 'asc' ? av - bv : bv - av;
+    }).slice(0, 200);
+
+    document.getElementById('show-count').textContent = `${items.length.toLocaleString()} matching · top 200 shown`;
+
+    const segColor = k => (Dash.SEGMENTS.find(s => s.key === k) || {}).color || '#64748B';
+    document.querySelector('#segTable tbody').innerHTML = rows.map(p => `
+      <tr>
+        <td><span class="strong">${p.product_name}</span></td>
+        <td>${p.main_category}<div style="font-size:11px;color:var(--ink-500)">${p.sub_category}</div></td>
+        <td class="num strong">${Dash.fmtINRFull(p.discounted_price)}</td>
+        <td class="num">${p.discount_percentage}%</td>
+        <td class="num"><span class="stars">★<span class="score">${p.rating.toFixed(1)}</span></span></td>
+        <td class="num">${Dash.fmt(p.units)}</td>
+        <td class="num strong">${Dash.fmtINR(p.revenue)}</td>
+        <td><span class="badge" style="background:${segColor(p.segment)}20;color:${segColor(p.segment)}">${p.segment}</span></td>
+      </tr>`).join('') || `<tr><td colspan="8" style="padding:40px;text-align:center;color:var(--ink-500)">No products match</td></tr>`;
+
+    document.querySelectorAll('#segTable thead th').forEach(th => {
+      th.classList.toggle('sorted', th.dataset.k === tSort.key);
+      th.classList.toggle('asc', tSort.dir === 'asc');
+      th.classList.toggle('desc', tSort.dir === 'desc');
+    });
+  }
+  document.querySelectorAll('#segTable thead th').forEach(th => {
+    th.addEventListener('click', () => {
+      if (tSort.key === th.dataset.k) tSort.dir = tSort.dir === 'asc' ? 'desc' : 'asc';
+      else tSort = { key: th.dataset.k, dir: 'desc' };
+      renderTable(store.getFiltered());
+    });
+  });
+
+  store.subscribe((filtered) => {
+    renderKpis(filtered);
+    renderMatrix(filtered, products);
+    renderContribution(filtered);
+    renderBubble(filtered);
+    renderSegTreemap(filtered);
+    renderSegHeatmap(filtered);
+    renderCohort(filtered);
+    renderNewReturning(filtered);
+    renderCategoryAffinity(filtered);
+    renderTable(filtered);
+  });
+  store.notify();
+
+  let rsz;
+  window.addEventListener('resize', () => {
+    clearTimeout(rsz);
+    rsz = setTimeout(() => {
+      renderSegTreemap(store.getFiltered());
+      renderSegHeatmap(store.getFiltered());
+    }, 200);
+  });
+})();
+</script>
+</body>
+</html>

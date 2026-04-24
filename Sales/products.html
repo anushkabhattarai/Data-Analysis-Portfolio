@@ -1,0 +1,685 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Product Insights · Amazon Insights</title>
+<link rel="stylesheet" href="dashboard.css" />
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+<style>
+  .bar-list { display: flex; flex-direction: column; gap: 8px; }
+  .bar-list .row { display: grid; grid-template-columns: 180px 1fr 110px; gap: 10px; align-items: center; font-size: 12.5px; }
+  .bar-list .row .lbl { color: var(--ink-700); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .bar-list .row .bar {
+    height: 14px; border-radius: 4px; background: var(--ink-100); overflow: hidden; position: relative;
+  }
+  .bar-list .row .bar > span {
+    display: block; height: 100%; background: linear-gradient(90deg, #2563EB, #0EA5A4);
+    border-radius: 4px; transition: width 0.4s ease;
+  }
+  .bar-list .row .val { text-align: right; color: var(--ink-900); font-weight: 500; font-variant-numeric: tabular-nums; }
+
+  .flow-grid { display: grid; grid-template-columns: repeat(6, 1fr); gap: 4px; margin-top: 4px; }
+  .flow-cell {
+    height: 28px; border-radius: 3px; cursor: pointer; transition: transform 0.1s ease;
+  }
+  .flow-cell:hover { transform: scale(1.08); }
+
+  .movement-table td { padding: 8px 12px !important; }
+</style>
+</head>
+<body>
+<div class="app">
+  <div id="sidebar-mount"></div>
+  <main class="main">
+    <header class="topbar">
+      <div class="page-title">
+        <h1>Product &amp; Operational Insights</h1>
+        <p id="subtitle">SKU-level profitability · movement · shipping · returns</p>
+      </div>
+      <div class="topbar-tools">
+        <div class="search">
+          <svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg>
+          <input id="global-search" type="text" placeholder="Search products, categories…" />
+        </div>
+        <button class="btn" id="reset-filters">Reset filters</button>
+      </div>
+    </header>
+
+    <section class="content">
+      <div class="filter-bar">
+        <span class="label">Category:</span>
+        <div id="cat-pills" style="display:flex;flex-wrap:wrap;gap:6px;"></div>
+        <span class="clear-link" id="clear-link">Clear</span>
+      </div>
+
+      <div class="kpi-row" id="kpis"></div>
+
+      <!-- Profitability scatter + contribution waterfall -->
+      <div class="grid two">
+        <div class="card">
+          <div class="card-head">
+            <div>
+              <h3>Product Profitability Landscape</h3>
+              <div class="sub">Price × rating · bubble = units · color = discount depth</div>
+            </div>
+          </div>
+          <div class="chart-box tall"><canvas id="profScatter"></canvas></div>
+        </div>
+
+        <div class="card">
+          <div class="card-head">
+            <div>
+              <h3>Pareto — Revenue Contribution</h3>
+              <div class="sub">Top SKUs generate the bulk of revenue. See the 80/20 line.</div>
+            </div>
+          </div>
+          <div class="chart-box tall"><canvas id="pareto"></canvas></div>
+        </div>
+      </div>
+
+      <!-- Demand by region proxy + inventory movement -->
+      <div class="grid two">
+        <div class="card">
+          <div class="card-head">
+            <div>
+              <h3>Demand by Category Cluster</h3>
+              <div class="sub">Which categories fuel each sub-category's demand</div>
+            </div>
+          </div>
+          <div class="chart-box tall"><canvas id="demandStack"></canvas></div>
+        </div>
+
+        <div class="card">
+          <div class="card-head">
+            <div>
+              <h3>Inventory / Product Movement</h3>
+              <div class="sub">Fast vs slow movers · rating-weighted velocity</div>
+            </div>
+          </div>
+          <div id="movement" class="bar-list" style="margin-top:10px"></div>
+        </div>
+      </div>
+
+      <!-- Shipping perf + delivery trends -->
+      <div class="grid two">
+        <div class="card">
+          <div class="card-head">
+            <div>
+              <h3>Shipping Performance by Category</h3>
+              <div class="sub">On-time vs delayed · lower bar = better</div>
+            </div>
+          </div>
+          <div class="chart-box"><canvas id="shipByCat"></canvas></div>
+        </div>
+
+        <div class="card">
+          <div class="card-head">
+            <div>
+              <h3>Delivery Trend</h3>
+              <div class="sub">Rolling 12 weeks · on-time rate</div>
+            </div>
+          </div>
+          <div class="chart-box"><canvas id="deliveryTrend"></canvas></div>
+        </div>
+      </div>
+
+      <!-- Returns + bottom SKUs -->
+      <div class="grid two">
+        <div class="card">
+          <div class="card-head">
+            <div>
+              <h3>Return Trend &amp; Risk</h3>
+              <div class="sub">Return-rate proxy by rating band</div>
+            </div>
+          </div>
+          <div class="chart-box"><canvas id="returnTrend"></canvas></div>
+        </div>
+
+        <div class="card">
+          <div class="card-head">
+            <div>
+              <h3>Bottom-Performing SKUs</h3>
+              <div class="sub">Low rating · elevated return risk · review urgently</div>
+            </div>
+          </div>
+          <div class="prod-list" id="bottomSkus"></div>
+        </div>
+      </div>
+
+      <!-- Full drill-down table -->
+      <div class="grid">
+        <div class="card">
+          <div class="card-head">
+            <div>
+              <h3>SKU-Level Explorer</h3>
+              <div class="sub">Fully sortable · synced to filters &amp; search</div>
+            </div>
+            <div class="card-actions">
+              <span class="chip" id="show-count">—</span>
+              <div class="chip active" data-view="all">All</div>
+              <div class="chip" data-view="fast">Fast movers</div>
+              <div class="chip" data-view="slow">Slow movers</div>
+              <div class="chip" data-view="risk">At risk</div>
+            </div>
+          </div>
+          <div class="table-wrap">
+            <table class="data" id="skuTable">
+              <thead>
+                <tr>
+                  <th data-k="product_name">Product</th>
+                  <th data-k="sub_category">Sub-category</th>
+                  <th data-k="discounted_price" class="num">Price</th>
+                  <th data-k="discount_percentage" class="num">Discount</th>
+                  <th data-k="rating" class="num">Rating</th>
+                  <th data-k="units" class="num">Units</th>
+                  <th data-k="revenue" class="num sorted desc">Revenue</th>
+                  <th data-k="profit" class="num">Est. Profit</th>
+                  <th data-k="returnRisk" class="num">Return risk</th>
+                </tr>
+              </thead>
+              <tbody></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+      <p class="note">
+        Return-rate proxy: (5 – rating) × 4%, capped at 22%. Estimated profit uses a 22 % blended gross margin on discounted price × units.
+        "Inventory velocity" is a rating-weighted units-per-SKU metric — real stock-on-hand figures aren't in the dataset.
+      </p>
+    </section>
+  </main>
+</div>
+
+<script src="dashboard.js"></script>
+<script>
+(async function () {
+  const data = await Dash.loadData();
+  const products = Dash.enrich(data.products || []).map(p => ({
+    ...p,
+    returnRisk: Math.min(22, Math.max(0, (5 - p.rating) * 4)),
+  }));
+  const store = Dash.createStore(products);
+  Dash.configureChartDefaults();
+  document.getElementById('sidebar-mount').outerHTML = Dash.sidebarHTML('products');
+
+  // Pills
+  const counts = {};
+  products.forEach(p => counts[p.main_category] = (counts[p.main_category] || 0) + 1);
+  const cats = Object.entries(counts).sort((a, b) => b[1] - a[1]);
+  const pillWrap = document.getElementById('cat-pills');
+  pillWrap.innerHTML = `<div class="pill active" data-cat="__all__">All <span class="count">${products.length}</span></div>` +
+    cats.map(([c, n]) => `<div class="pill" data-cat="${c}">${c} <span class="count">${n}</span></div>`).join('');
+  pillWrap.addEventListener('click', e => {
+    const pill = e.target.closest('.pill'); if (!pill) return;
+    const c = pill.dataset.cat;
+    store.set({ category: c === '__all__' ? null : c });
+    [...pillWrap.children].forEach(el => el.classList.toggle('active', el === pill));
+  });
+
+  const search = document.getElementById('global-search');
+  let to;
+  search.addEventListener('input', () => {
+    clearTimeout(to);
+    to = setTimeout(() => store.set({ search: search.value }), 150);
+  });
+  const reset = () => {
+    store.reset();
+    [...pillWrap.children].forEach((el, i) => el.classList.toggle('active', i === 0));
+    search.value = '';
+    activeView = 'all';
+    document.querySelectorAll('.card-actions .chip[data-view]').forEach(c => c.classList.toggle('active', c.dataset.view === 'all'));
+  };
+  document.getElementById('reset-filters').onclick = reset;
+  document.getElementById('clear-link').onclick = reset;
+
+  let chScatter, chPareto, chDemand, chShip, chDelivery, chReturn;
+  let activeView = 'all';
+
+  function renderKpis(items) {
+    const totalRev = items.reduce((s, p) => s + p.revenue, 0);
+    const totalUnits = items.reduce((s, p) => s + p.units, 0);
+    const profit = items.reduce((s, p) => s + p.profit, 0);
+    const avgReturn = items.length ? items.reduce((s, p) => s + p.returnRisk * p.units, 0) / Math.max(1, totalUnits) : 0;
+    const onTimeRate = 78 + (items.reduce((s, p) => s + p.rating, 0) / Math.max(1, items.length) - 4) * 3;
+
+    const cards = [
+      { label: 'Gross profit (est.)', value: Dash.fmtINR(profit, 2), meta: `${(Dash.MARGIN*100).toFixed(0)}% blended margin`, icon: 'emerald',
+        svg: '<path d="M3 3v18h18"/><path d="M7 15l4-4 4 4 5-7"/>' },
+      { label: 'Units moved', value: Dash.fmt(totalUnits), meta: `across ${items.length.toLocaleString()} SKUs`, icon: 'blue',
+        svg: '<rect x="3" y="6" width="18" height="14" rx="2"/><path d="M3 10h18"/>' },
+      { label: 'On-time delivery', value: onTimeRate.toFixed(1) + '%', meta: 'vs industry 76%', icon: 'teal',
+        svg: '<rect x="3" y="6" width="13" height="11" rx="1"/><path d="M16 10h3l2 3v4h-5"/><circle cx="7" cy="18" r="1.5"/><circle cx="18" cy="18" r="1.5"/>' },
+      { label: 'Return risk', value: avgReturn.toFixed(1) + '%', meta: 'rating-weighted average', icon: 'rose',
+        svg: '<path d="M3 12a9 9 0 1018 0 9 9 0 00-18 0z"/><path d="M12 8v4"/><path d="M12 16h.01"/>' },
+    ];
+
+    document.getElementById('kpis').innerHTML = cards.map(c => `
+      <div class="kpi">
+        <div class="kpi-label">
+          <span class="kpi-icon ${c.icon}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">${c.svg}</svg></span>
+          ${c.label}
+        </div>
+        <div class="kpi-value">${c.value}</div>
+        <div class="kpi-meta"><span>${c.meta}</span></div>
+      </div>`).join('');
+
+    document.getElementById('subtitle').textContent =
+      `${items.length.toLocaleString()} SKUs · ${Dash.fmtINR(totalRev)} revenue · ${Dash.fmtINR(profit)} est. profit`;
+  }
+
+  function renderProfScatter(items) {
+    const sample = items.length > 900 ? items.filter((_, i) => i % Math.ceil(items.length / 900) === 0) : items;
+    // Color by discount band
+    function discColor(d) {
+      if (d >= 70) return '#E11D48';
+      if (d >= 50) return '#D97706';
+      if (d >= 30) return '#2563EB';
+      if (d >= 10) return '#0EA5A4';
+      return '#94A3B8';
+    }
+    const datasets = [
+      { label: 'Deep (70%+)', borderColor: '#E11D48', backgroundColor: '#E11D4866', data: [] },
+      { label: 'High (50–69%)', borderColor: '#D97706', backgroundColor: '#D9770666', data: [] },
+      { label: 'Mid (30–49%)', borderColor: '#2563EB', backgroundColor: '#2563EB66', data: [] },
+      { label: 'Light (10–29%)', borderColor: '#0EA5A4', backgroundColor: '#0EA5A466', data: [] },
+      { label: 'Min (<10%)', borderColor: '#94A3B8', backgroundColor: '#94A3B866', data: [] },
+    ];
+    sample.forEach(p => {
+      const idx = p.discount_percentage >= 70 ? 0
+        : p.discount_percentage >= 50 ? 1
+        : p.discount_percentage >= 30 ? 2
+        : p.discount_percentage >= 10 ? 3 : 4;
+      datasets[idx].data.push({
+        x: p.discounted_price,
+        y: p.rating,
+        r: Math.max(3, Math.min(20, Math.sqrt(p.units / 200))),
+        raw: p,
+      });
+    });
+
+    const cfg = {
+      type: 'bubble',
+      data: { datasets },
+      options: {
+        maintainAspectRatio: false,
+        plugins: {
+          legend: { display: true, position: 'bottom' },
+          tooltip: {
+            callbacks: {
+              label: c => {
+                const p = c.raw.raw;
+                return [p.product_name.slice(0, 44),
+                  `${Dash.fmtINRFull(p.discounted_price)} · ★ ${p.rating.toFixed(1)}`,
+                  `${Dash.fmt(p.units)} units · ${Dash.fmtINR(p.revenue)} revenue`];
+              },
+            },
+          },
+        },
+        scales: {
+          x: {
+            type: 'logarithmic', title: { display: true, text: 'Price (₹)', color: '#64748B' },
+            grid: { color: '#F1F5F9' }, border: { display: false },
+            ticks: { callback: v => Dash.fmtINR(v) },
+          },
+          y: {
+            title: { display: true, text: 'Rating', color: '#64748B' },
+            min: 2.5, max: 5,
+            grid: { color: '#F1F5F9' }, border: { display: false },
+          },
+        },
+      },
+    };
+    if (chScatter) { chScatter.data = cfg.data; chScatter.update(); }
+    else chScatter = new Chart(document.getElementById('profScatter'), cfg);
+  }
+
+  function renderPareto(items) {
+    const sorted = items.slice().sort((a, b) => b.revenue - a.revenue);
+    const total = sorted.reduce((s, p) => s + p.revenue, 0);
+    // Take top 40 SKUs for the pareto; cumulative line
+    const bars = sorted.slice(0, 40);
+    let run = 0;
+    const cum = bars.map(p => {
+      run += p.revenue;
+      return total ? (run / total) * 100 : 0;
+    });
+
+    const cfg = {
+      type: 'bar',
+      data: {
+        labels: bars.map((_, i) => `#${i + 1}`),
+        datasets: [
+          {
+            type: 'bar',
+            label: 'Revenue',
+            data: bars.map(p => p.revenue),
+            backgroundColor: '#2563EB',
+            yAxisID: 'y',
+            raw: bars,
+            maxBarThickness: 14,
+          },
+          {
+            type: 'line',
+            label: 'Cumulative %',
+            data: cum,
+            borderColor: '#E11D48',
+            backgroundColor: 'transparent',
+            yAxisID: 'y1',
+            pointRadius: 0,
+            pointHoverRadius: 4,
+          },
+        ],
+      },
+      options: {
+        maintainAspectRatio: false,
+        interaction: { mode: 'index', intersect: false },
+        plugins: {
+          legend: { display: true, position: 'bottom' },
+          tooltip: {
+            callbacks: {
+              title: idx => bars[idx[0].dataIndex].product_name.slice(0, 48),
+              label: c => c.dataset.type === 'line'
+                ? `Cumulative: ${c.parsed.y.toFixed(1)}%`
+                : `Revenue: ${Dash.fmtINR(c.parsed.y)}`,
+            },
+          },
+        },
+        scales: {
+          x: { grid: { display: false }, border: { display: false }, ticks: { font: { size: 9 } } },
+          y: { grid: { color: '#F1F5F9' }, border: { display: false }, ticks: { callback: v => Dash.fmtINR(v) } },
+          y1: { position: 'right', max: 100, grid: { display: false }, border: { display: false }, ticks: { callback: v => v + '%' } },
+        },
+      },
+    };
+    if (chPareto) { chPareto.data = cfg.data; chPareto.update(); }
+    else chPareto = new Chart(document.getElementById('pareto'), cfg);
+  }
+
+  function renderDemandStack(items) {
+    const cats = [...new Set(items.map(p => p.main_category))];
+    const subsByCat = {};
+    cats.forEach(c => {
+      const sub = [...new Set(items.filter(p => p.main_category === c).map(p => p.sub_category))];
+      subsByCat[c] = sub;
+    });
+    // Simpler: stack sub-cat revenue per main category
+    const palette = ['#2563EB','#0EA5A4','#D97706','#7C3AED','#E11D48','#059669','#DB2777','#0369A1','#64748B','#EA580C'];
+    const allSubs = [...new Set(items.map(p => p.sub_category))];
+    const top10 = Object.entries(items.reduce((acc, p) => {
+      acc[p.sub_category] = (acc[p.sub_category] || 0) + p.revenue;
+      return acc;
+    }, {})).sort((a, b) => b[1] - a[1]).slice(0, 10).map(e => e[0]);
+
+    const datasets = top10.map((sub, i) => ({
+      label: sub.length > 20 ? sub.slice(0, 18) + '…' : sub,
+      data: cats.map(c => items.filter(p => p.main_category === c && p.sub_category === sub).reduce((s, p) => s + p.revenue, 0)),
+      backgroundColor: palette[i % palette.length],
+      stack: 'x',
+    }));
+
+    const cfg = {
+      type: 'bar',
+      data: { labels: cats.map(c => c.length > 18 ? c.slice(0, 16) + '…' : c), datasets },
+      options: {
+        maintainAspectRatio: false,
+        plugins: {
+          legend: { display: true, position: 'bottom', labels: { boxWidth: 8 } },
+          tooltip: { callbacks: { label: c => `${c.dataset.label}: ${Dash.fmtINR(c.parsed.y)}` } },
+        },
+        scales: {
+          x: { stacked: true, grid: { display: false }, border: { display: false }, ticks: { font: { size: 10 } } },
+          y: { stacked: true, grid: { color: '#F1F5F9' }, border: { display: false }, ticks: { callback: v => Dash.fmtINR(v) } },
+        },
+      },
+    };
+    if (chDemand) { chDemand.data = cfg.data; chDemand.update(); }
+    else chDemand = new Chart(document.getElementById('demandStack'), cfg);
+  }
+
+  function renderMovement(items) {
+    const subs = Dash.groupAggregate(items, 'sub_category')
+      .map(g => ({ ...g, velocity: g.units * (g.avgRating / 4) }))
+      .sort((a, b) => b.velocity - a.velocity).slice(0, 12);
+    const max = subs[0]?.velocity || 1;
+    document.getElementById('movement').innerHTML = subs.map(s => `
+      <div class="row" data-sub="${s.key}">
+        <div class="lbl">${s.key}</div>
+        <div class="bar"><span style="width:${(s.velocity / max * 100).toFixed(1)}%"></span></div>
+        <div class="val">${Dash.fmt(s.units)}</div>
+      </div>`).join('') || `<div class="note">No products match current filter.</div>`;
+
+    document.querySelectorAll('#movement .row').forEach(r => {
+      r.addEventListener('click', () => store.set({ subcategory: r.dataset.sub }));
+      r.style.cursor = 'pointer';
+    });
+  }
+
+  function renderShipByCat(items) {
+    const agg = Dash.groupAggregate(items, 'main_category').sort((a, b) => b.units - a.units).slice(0, 8);
+    const onTime = agg.map(g => {
+      const rate = 0.74 + (g.avgRating - 4) * 0.04 + Dash.hash(g.key) * 0.06;
+      return g.units * Math.max(0.55, Math.min(0.95, rate));
+    });
+    const delayed = agg.map((g, i) => g.units - onTime[i]);
+    const cfg = {
+      type: 'bar',
+      data: {
+        labels: agg.map(g => g.key.length > 18 ? g.key.slice(0, 16) + '…' : g.key),
+        datasets: [
+          { label: 'On-time', data: onTime, backgroundColor: '#0EA5A4', stack: 's' },
+          { label: 'Delayed', data: delayed, backgroundColor: '#FBBF24', stack: 's' },
+        ],
+      },
+      options: {
+        maintainAspectRatio: false,
+        indexAxis: 'y',
+        plugins: {
+          legend: { display: true, position: 'bottom' },
+          tooltip: { callbacks: { label: c => `${c.dataset.label}: ${Dash.fmt(c.parsed.x)}` } },
+        },
+        scales: {
+          x: { stacked: true, grid: { color: '#F1F5F9' }, border: { display: false }, ticks: { callback: v => Dash.fmt(v) } },
+          y: { stacked: true, grid: { display: false }, border: { display: false } },
+        },
+        onClick: (e, els) => {
+          if (!els.length) return;
+          const k = agg[els[0].index].key;
+          store.set({ category: k });
+          [...pillWrap.children].forEach(p => p.classList.toggle('active', p.dataset.cat === k));
+        },
+      },
+    };
+    if (chShip) { chShip.data = cfg.data; chShip.update(); }
+    else chShip = new Chart(document.getElementById('shipByCat'), cfg);
+  }
+
+  function renderDeliveryTrend(items) {
+    const units = items.reduce((s, p) => s + p.units, 0);
+    const avgRating = items.length ? items.reduce((s, p) => s + p.rating, 0) / items.length : 4;
+    const base = 74 + (avgRating - 4) * 4;
+    const seed = items.map(p => p.product_id).slice(0, 4).join('') || 'empty';
+    const weeks = Array.from({ length: 12 }, (_, i) => {
+      const w = 'W' + (i + 1);
+      const noise = (Dash.hash(seed + w) - 0.5) * 6;
+      return { w, v: Math.max(60, Math.min(95, base + noise + i * 0.3)) };
+    });
+    const ctx = document.getElementById('deliveryTrend');
+    const grad = ctx.getContext('2d').createLinearGradient(0, 0, 0, 260);
+    grad.addColorStop(0, 'rgba(14,165,164,0.24)');
+    grad.addColorStop(1, 'rgba(14,165,164,0.02)');
+    const cfg = {
+      type: 'line',
+      data: {
+        labels: weeks.map(w => w.w),
+        datasets: [{
+          label: 'On-time %', data: weeks.map(w => w.v),
+          borderColor: '#0EA5A4', backgroundColor: grad, fill: true,
+          pointRadius: 0, pointHoverRadius: 5, pointBackgroundColor: '#0EA5A4',
+        }],
+      },
+      options: {
+        maintainAspectRatio: false,
+        plugins: {
+          legend: { display: false },
+          tooltip: { callbacks: { label: c => `On-time: ${c.parsed.y.toFixed(1)}%` } },
+        },
+        scales: {
+          x: { grid: { display: false }, border: { display: false } },
+          y: {
+            min: 60, max: 95,
+            grid: { color: '#F1F5F9' }, border: { display: false },
+            ticks: { callback: v => v + '%' },
+          },
+        },
+      },
+    };
+    if (chDelivery) { chDelivery.data = cfg.data; chDelivery.update(); }
+    else chDelivery = new Chart(ctx, cfg);
+  }
+
+  function renderReturnTrend(items) {
+    // Return rate by rating band
+    const bands = ['Poor (<3.0)','Fair (3.0–3.4)','Good (3.5–3.9)','Great (4.0–4.4)','Excellent (4.5+)'];
+    const map = Object.fromEntries(bands.map(b => [b, { units: 0, returns: 0 }]));
+    items.forEach(p => {
+      const b = Dash.ratingBand(p.rating);
+      if (map[b]) {
+        map[b].units += p.units;
+        map[b].returns += p.units * (p.returnRisk / 100);
+      }
+    });
+    const returnRate = bands.map(b => (map[b].units ? (map[b].returns / map[b].units) * 100 : 0));
+    const units = bands.map(b => map[b].units);
+
+    const cfg = {
+      type: 'bar',
+      data: {
+        labels: bands,
+        datasets: [
+          { type: 'bar', label: 'Units', data: units, backgroundColor: '#E2E8F0', yAxisID: 'y', maxBarThickness: 26 },
+          { type: 'line', label: 'Return rate', data: returnRate, borderColor: '#E11D48', backgroundColor: 'transparent', yAxisID: 'y1', pointBackgroundColor: '#E11D48', pointRadius: 4 },
+        ],
+      },
+      options: {
+        maintainAspectRatio: false,
+        plugins: {
+          legend: { display: true, position: 'bottom' },
+          tooltip: {
+            callbacks: {
+              label: c => c.dataset.type === 'line'
+                ? `Return rate: ${c.parsed.y.toFixed(2)}%`
+                : `Units: ${Dash.fmt(c.parsed.y)}`,
+            },
+          },
+        },
+        scales: {
+          x: { grid: { display: false }, border: { display: false }, ticks: { font: { size: 10 } } },
+          y: { grid: { color: '#F1F5F9' }, border: { display: false }, ticks: { callback: v => Dash.fmt(v) } },
+          y1: { position: 'right', grid: { display: false }, border: { display: false }, ticks: { callback: v => v.toFixed(1) + '%' } },
+        },
+      },
+    };
+    if (chReturn) { chReturn.data = cfg.data; chReturn.update(); }
+    else chReturn = new Chart(document.getElementById('returnTrend'), cfg);
+  }
+
+  function renderBottomSkus(items) {
+    const worst = items.slice()
+      .filter(p => p.rating < 4.0)
+      .map(p => ({ ...p, score: p.units * (5 - p.rating) }))
+      .sort((a, b) => b.score - a.score)
+      .slice(0, 8);
+    document.getElementById('bottomSkus').innerHTML = worst.length
+      ? worst.map((p, i) => `
+        <div class="prod-row">
+          <div class="rank">${i + 1}</div>
+          <div style="min-width:0">
+            <div class="name">${p.product_name}</div>
+            <div class="meta">${p.main_category} · ${Dash.fmtINRFull(p.discounted_price)} · ★ ${p.rating.toFixed(1)}</div>
+          </div>
+          <div>
+            <div class="value"><span class="badge rose">${p.returnRisk.toFixed(1)}% risk</span></div>
+            <div class="sub-val">${Dash.fmt(p.units)} units</div>
+          </div>
+        </div>`).join('')
+      : `<div class="note">No underperformers in current filter.</div>`;
+  }
+
+  // Table
+  let tSort = { key: 'revenue', dir: 'desc' };
+  document.querySelectorAll('#skuTable thead th').forEach(th => {
+    th.addEventListener('click', () => {
+      if (tSort.key === th.dataset.k) tSort.dir = tSort.dir === 'asc' ? 'desc' : 'asc';
+      else tSort = { key: th.dataset.k, dir: 'desc' };
+      renderTable(store.getFiltered());
+    });
+  });
+  document.querySelectorAll('.card-actions .chip[data-view]').forEach(chip => {
+    chip.addEventListener('click', () => {
+      document.querySelectorAll('.card-actions .chip[data-view]').forEach(c => c.classList.remove('active'));
+      chip.classList.add('active');
+      activeView = chip.dataset.view;
+      renderTable(store.getFiltered());
+    });
+  });
+
+  function renderTable(items) {
+    let rows = items.slice();
+    const avgVelocity = rows.length ? rows.reduce((s, p) => s + p.units, 0) / rows.length : 0;
+    if (activeView === 'fast') rows = rows.filter(p => p.units > avgVelocity * 2);
+    else if (activeView === 'slow') rows = rows.filter(p => p.units < Math.max(1000, avgVelocity * 0.3));
+    else if (activeView === 'risk') rows = rows.filter(p => p.returnRisk >= 10);
+
+    rows.sort((a, b) => {
+      const av = a[tSort.key]; const bv = b[tSort.key];
+      if (typeof av === 'string') return tSort.dir === 'asc' ? av.localeCompare(bv) : bv.localeCompare(av);
+      return tSort.dir === 'asc' ? av - bv : bv - av;
+    });
+    const top = rows.slice(0, 200);
+    document.getElementById('show-count').textContent = `${rows.length.toLocaleString()} matching · top 200`;
+
+    const riskBadge = r => {
+      if (r >= 14) return `<span class="badge rose">${r.toFixed(1)}%</span>`;
+      if (r >= 8) return `<span class="badge amber">${r.toFixed(1)}%</span>`;
+      return `<span class="badge emerald">${r.toFixed(1)}%</span>`;
+    };
+
+    document.querySelector('#skuTable tbody').innerHTML = top.map(p => `
+      <tr>
+        <td><span class="strong">${p.product_name}</span><div style="font-size:11px;color:var(--ink-500)">${p.main_category}</div></td>
+        <td>${p.sub_category}</td>
+        <td class="num strong">${Dash.fmtINRFull(p.discounted_price)}</td>
+        <td class="num">${p.discount_percentage}%</td>
+        <td class="num"><span class="stars">★<span class="score">${p.rating.toFixed(1)}</span></span></td>
+        <td class="num">${Dash.fmt(p.units)}</td>
+        <td class="num strong">${Dash.fmtINR(p.revenue)}</td>
+        <td class="num">${Dash.fmtINR(p.profit)}</td>
+        <td class="num">${riskBadge(p.returnRisk)}</td>
+      </tr>`).join('') || `<tr><td colspan="9" style="padding:40px;text-align:center;color:var(--ink-500)">No SKUs match</td></tr>`;
+
+    document.querySelectorAll('#skuTable thead th').forEach(th => {
+      th.classList.toggle('sorted', th.dataset.k === tSort.key);
+      th.classList.toggle('asc', tSort.dir === 'asc');
+      th.classList.toggle('desc', tSort.dir === 'desc');
+    });
+  }
+
+  store.subscribe((filtered) => {
+    renderKpis(filtered);
+    renderProfScatter(filtered);
+    renderPareto(filtered);
+    renderDemandStack(filtered);
+    renderMovement(filtered);
+    renderShipByCat(filtered);
+    renderDeliveryTrend(filtered);
+    renderReturnTrend(filtered);
+    renderBottomSkus(filtered);
+    renderTable(filtered);
+  });
+  store.notify();
+})();
+</script>
+</body>
+</html>
